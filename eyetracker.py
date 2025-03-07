@@ -171,9 +171,8 @@ class EyeTrackingHeatmap:
             cv2.destroyWindow("Calibration")
             print("Calibration complete!")
             return True
-        else:
-            print("Calibration failed. Please try again.")
-            return False
+        print("Calibration failed. Please try again.")
+        return False
 
     def map_eye_to_screen(self, eye_pos):
         """Map eye position to screen coordinates using perspective transform"""
