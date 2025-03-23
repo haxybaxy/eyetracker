@@ -157,6 +157,11 @@ class EyeTrackingHeatmap:
                     self._add_gaussian_to_heatmap(screen_pos)
                     cv2.circle(frame, eye_pos, 10, (0, 255, 0), -1)
 
+                    # NEW: draw red dot at estimated screen position
+                    stimulus_display = self.stimulus.copy()
+                    cv2.circle(stimulus_display, screen_pos, 10, (0, 0, 255), -1)
+                    cv2.imshow("Stimulus", stimulus_display)
+
             cv2.imshow("Eye Tracking", frame)
             if cv2.waitKey(1) & 0xFF == 27:
                 break
@@ -187,6 +192,7 @@ class EyeTrackingHeatmap:
         cv2.waitKey(0)
         cv2.imwrite(save_path, blended)
         print(f"Heatmap saved to {save_path}")
+
 
 def main():
     tracker = EyeTrackingHeatmap()
