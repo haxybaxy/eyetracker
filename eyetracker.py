@@ -1,202 +1,157 @@
-import os
-import time
 import cv2
+import mediapipe as mp
 import numpy as np
-import dlib
+import time
 
-class EyeTrackingHeatmap:
-    def __init__(self, stimulus_path=None, camera_id=0, heatmap_resolution=(800, 600)):
-        self.camera_id = camera_id
-        self.cap = None
-        
-        # Load Dlib face detector & shape predictor
-        self.detector = dlib.get_frontal_face_detector()
-        self.predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
+# Initialize Mediapipe Face Mesh with iris tracking
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(
+    max_num_faces=1,
+    refine_landmarks=True,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
 
-        self.heatmap_resolution = heatmap_resolution
-        self.stimulus_path = stimulus_path
-        self.stimulus = self.load_stimulus()
-        
-        self.gaze_points = []
-        self.heatmap = np.zeros((heatmap_resolution[1], heatmap_resolution[0]), dtype=np.float32)
-        self.running = False
-        
-        # Calibration Data
-        self.calibrated = False
-        self.screen_corners = np.array([
-            [0, 0],
-            [heatmap_resolution[0], 0],
-            [0, heatmap_resolution[1]],
-            [heatmap_resolution[0], heatmap_resolution[1]],
-        ])
-        self.eye_corners = []
+# Iris landmark indices
+LEFT_IRIS_IDX = [468, 469, 470, 471]
+RIGHT_IRIS_IDX = [473, 474, 475, 476]
 
-    def load_stimulus(self):
-        if self.stimulus_path and os.path.exists(self.stimulus_path):
-            stimulus = cv2.imread(self.stimulus_path)
-            return cv2.resize(stimulus, self.heatmap_resolution)
-        return np.ones((self.heatmap_resolution[1], self.heatmap_resolution[0], 3), dtype=np.uint8) * 255
+def get_screen_resolution():
+    window_name = "temp_win"
+    cv2.namedWindow(window_name, cv2.WND_PROP_FULLSCREEN)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    screen_w = cv2.getWindowImageRect(window_name)[2]
+    screen_h = cv2.getWindowImageRect(window_name)[3]
+    cv2.destroyWindow(window_name)
+    return screen_w, screen_h
 
-    def start_camera(self):
-        self.cap = cv2.VideoCapture(self.camera_id)
-        if not self.cap.isOpened():
-            raise Exception("Could not open camera.")
-    
-    def calibrate(self):
-        """Calibrate eye tracking by mapping eye positions to screen corners"""
-        self.eye_corners = []
-        corners_text = ["top-left", "top-right", "bottom-left", "bottom-right"]
-        calibration_display = self.stimulus.copy()
+SCREEN_W, SCREEN_H = get_screen_resolution()
 
-        for i, corner in enumerate(self.screen_corners):
-            cv2.circle(calibration_display, (int(corner[0]), int(corner[1])), 25, (0, 0, 255), -1)
-            cv2.putText(
-                calibration_display, f"Look at the {corners_text[i]} corner",
-                (int(self.heatmap_resolution[0] / 3), int(self.heatmap_resolution[1] / 2)),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2
-            )
+def get_iris_center(landmarks, indices, frame_shape):
+    h, w = frame_shape[:2]
+    pts = []
+    for i in indices:
+        lm = landmarks.landmark[i]
+        pts.append([int(lm.x * w), int(lm.y * h)])
+    pts = np.array(pts)
+    center = np.mean(pts, axis=0)
+    return center
 
-            cv2.imshow("Calibration", calibration_display)
-            cv2.waitKey(500)
+def compute_gaze_position(left_center, right_center):
+    return (left_center + right_center) / 2
 
-            eye_pos = None
-            start_time = time.time()
-            while time.time() - start_time < 3:
-                ret, frame = self.cap.read()
-                if not ret:
-                    continue
+def calibrate(cap):
+    # Define calibration points close to corners
+    margin = 0.02
+    calibration_targets = [
+        (int(SCREEN_W * margin), int(SCREEN_H * margin)),                   # Top-left
+        (int(SCREEN_W * (1 - margin)), int(SCREEN_H * margin)),            # Top-right
+        (int(SCREEN_W * (1 - margin)), int(SCREEN_H * (1 - margin))),      # Bottom-right
+        (int(SCREEN_W * margin), int(SCREEN_H * (1 - margin)))             # Bottom-left
+    ]
 
-                frame = cv2.flip(frame, 1)
-                eye_pos, _ = self.detect_eyes(frame)  # Get eye position
+    raw_points = []
+    intereye_distances = []
 
-                if eye_pos:
-                    cv2.circle(frame, (eye_pos[0], eye_pos[1]), 10, (0, 255, 0), -1)
-                cv2.imshow("Eye Tracking", frame)
-                cv2.waitKey(1)
+    print("=== Calibration Mode ===")
+    print("Look at each RED dot and press SPACE to capture.\n")
 
-            if eye_pos is not None:
-                self.eye_corners.append(eye_pos)
-            else:
-                print(f"Could not detect eyes for {corners_text[i]} corner. Retrying...")
-                i -= 1
-                continue
-
-            calibration_display = self.stimulus.copy()
-
-        if len(self.eye_corners) == 4:
-            self.eye_corners = np.array(self.eye_corners)
-            self.calibrated = True
-            cv2.destroyWindow("Calibration")
-            print("Calibration complete!")
-            return True
-
-        print("Calibration failed. Please try again.")
-        return False
-
-    def detect_eyes(self, frame):
-        """Detects eyes using Dlib’s shape predictor and returns eye position + outlines"""
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = self.detector(gray)
-        
-        for face in faces:
-            landmarks = self.predictor(gray, face)
-
-            # Get eye landmarks
-            left_eye_pts = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in range(36, 42)])
-            right_eye_pts = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in range(42, 48)])
-
-            # Draw eye outlines
-            cv2.polylines(frame, [left_eye_pts], isClosed=True, color=(0, 255, 0), thickness=2)
-            cv2.polylines(frame, [right_eye_pts], isClosed=True, color=(0, 255, 0), thickness=2)
-
-            left_eye = (landmarks.part(36).x, landmarks.part(36).y)
-            right_eye = (landmarks.part(45).x, landmarks.part(45).y)
-            eye_center = ((left_eye[0] + right_eye[0]) // 2, (left_eye[1] + right_eye[1]) // 2)
-            return eye_center, frame
-        return None, frame
-
-    def map_eye_to_screen(self, eye_pos):
-        """Maps detected eye position to screen coordinates using homography"""
-        if not self.calibrated or len(self.eye_corners) != 4:
-            return None
-
-        h, _ = cv2.findHomography(self.eye_corners, self.screen_corners)
-        screen_pos = cv2.perspectiveTransform(np.array([eye_pos], dtype=np.float32).reshape(-1, 1, 2), h)
-        return (int(screen_pos[0][0][0]), int(screen_pos[0][0][1]))
-
-    def track_eyes(self, duration=10):
-        """Tracks eye movement and updates heatmap"""
-        self.start_camera()
-
-        if not self.calibrated:
-            if not self.calibrate():
-                return False
-
-        self.gaze_points = []
-        self.heatmap = np.zeros((self.heatmap_resolution[1], self.heatmap_resolution[0]), dtype=np.float32)
-
-        cv2.namedWindow("Stimulus")
-        cv2.imshow("Stimulus", self.stimulus)
-
-        start_time = time.time()
-        print(f"Starting eye tracking for {duration} seconds...")
-
-        while time.time() - start_time < duration:
-            ret, frame = self.cap.read()
+    for point in calibration_targets:
+        captured = False
+        while not captured:
+            ret, frame = cap.read()
             if not ret:
                 continue
-
             frame = cv2.flip(frame, 1)
-            eye_pos, frame = self.detect_eyes(frame)
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = face_mesh.process(frame_rgb)
 
-            if eye_pos:
-                screen_pos = self.map_eye_to_screen(eye_pos)
-                if screen_pos and 0 <= screen_pos[0] < self.heatmap_resolution[0] and 0 <= screen_pos[1] < self.heatmap_resolution[1]:
-                    self.gaze_points.append(screen_pos)
-                    self._add_gaussian_to_heatmap(screen_pos)
-                    cv2.circle(frame, eye_pos, 10, (0, 255, 0), -1)
+            calib_img = np.zeros((SCREEN_H, SCREEN_W, 3), dtype=np.uint8)
+            cv2.circle(calib_img, point, 12, (0, 0, 255), -1)  # Red dot
+            cv2.imshow("Calibration", calib_img)
 
-                    # NEW: draw red dot at estimated screen position
-                    stimulus_display = self.stimulus.copy()
-                    cv2.circle(stimulus_display, screen_pos, 10, (0, 0, 255), -1)
-                    cv2.imshow("Stimulus", stimulus_display)
+            if results.multi_face_landmarks:
+                face_landmarks = results.multi_face_landmarks[0]
+                left_center = get_iris_center(face_landmarks, LEFT_IRIS_IDX, frame.shape)
+                right_center = get_iris_center(face_landmarks, RIGHT_IRIS_IDX, frame.shape)
+                gaze_point = compute_gaze_position(left_center, right_center)
+                cv2.circle(frame, (int(gaze_point[0]), int(gaze_point[1])), 5, (0, 255, 0), -1)
 
-            cv2.imshow("Eye Tracking", frame)
-            if cv2.waitKey(1) & 0xFF == 27:
-                break
+            cv2.imshow("Camera", frame)
+            key = cv2.waitKey(1) & 0xFF
+            if key == 32 and results.multi_face_landmarks:  # SPACE
+                raw_points.append(gaze_point)
+                d = np.linalg.norm(left_center - right_center)
+                intereye_distances.append(d)
+                print(f"Captured gaze for {point}")
+                captured = True
 
-        print(f"Eye tracking complete! Collected {len(self.gaze_points)} gaze points.")
-        self.cap.release()
-        cv2.destroyAllWindows()
-        return True
+    baseline_distance = np.mean(intereye_distances)
+    raw_points = np.array(raw_points, dtype=np.float32)
+    calib_points = np.array(calibration_targets, dtype=np.float32)
+    transform_matrix = cv2.getPerspectiveTransform(raw_points, calib_points)
 
-    def _add_gaussian_to_heatmap(self, center, sigma=50):
-        """Adds a Gaussian blob to heatmap at given center"""
-        y, x = np.meshgrid(np.arange(self.heatmap_resolution[1]), np.arange(self.heatmap_resolution[0]), indexing="ij")
-        dst = np.sqrt((x - center[0]) ** 2 + (y - center[1]) ** 2)
-        gaussian = np.exp(-(dst**2) / (2 * sigma**2))
-        self.heatmap += gaussian
-
-    def generate_heatmap(self, save_path="heatmap.png"):
-        """Generates and displays gaze heatmap"""
-        if len(self.gaze_points) == 0:
-            print("No gaze data collected.")
-            return
-        
-        heatmap_normalized = cv2.normalize(self.heatmap, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-        heatmap_color = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
-        blended = cv2.addWeighted(self.stimulus, 0.6, heatmap_color, 0.4, 0)
-
-        cv2.imshow("Gaze Heatmap", blended)
-        cv2.waitKey(0)
-        cv2.imwrite(save_path, blended)
-        print(f"Heatmap saved to {save_path}")
-
+    cv2.destroyWindow("Calibration")
+    return transform_matrix, baseline_distance
 
 def main():
-    tracker = EyeTrackingHeatmap()
-    tracker.track_eyes(duration=10)
-    tracker.generate_heatmap()
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("Error: Unable to access camera")
+        return
+
+    transform_matrix, baseline_distance = calibrate(cap)
+    print("\nCalibration complete. Tracking started...")
+    print("Press 'Q' to exit.\n")
+
+    # === Live Tracking on black screen ===
+    smoothing_factor = 0.2
+    smoothed_mapped = None
+    start_time = time.time()
+    duration = 30  # seconds
+
+    while time.time() - start_time < duration:
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        frame = cv2.flip(frame, 1)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = face_mesh.process(frame_rgb)
+
+        black_screen = np.zeros((SCREEN_H, SCREEN_W, 3), dtype=np.uint8)
+
+        if results.multi_face_landmarks:
+            face_landmarks = results.multi_face_landmarks[0]
+            left_center = get_iris_center(face_landmarks, LEFT_IRIS_IDX, frame.shape)
+            right_center = get_iris_center(face_landmarks, RIGHT_IRIS_IDX, frame.shape)
+            gaze_point = compute_gaze_position(left_center, right_center)
+
+            current_distance = np.linalg.norm(left_center - right_center)
+            distance_scale = baseline_distance / current_distance
+            adjusted_gaze = (gaze_point - gaze_point * 0) * distance_scale
+
+            raw_point = np.array([[[gaze_point[0], gaze_point[1]]]], dtype=np.float32)
+            mapped_point = cv2.perspectiveTransform(raw_point, transform_matrix)
+            mapped_point = mapped_point[0][0].astype(int)
+
+            mapped_x = max(0, min(SCREEN_W - 1, mapped_point[0]))
+            mapped_y = max(0, min(SCREEN_H - 1, mapped_point[1]))
+
+            if smoothed_mapped is None:
+                smoothed_mapped = np.array([mapped_x, mapped_y], dtype=np.float32)
+            else:
+                smoothed_mapped = smoothing_factor * np.array([mapped_x, mapped_y], dtype=np.float32) + \
+                                  (1 - smoothing_factor) * smoothed_mapped
+
+            cv2.circle(black_screen, (int(smoothed_mapped[0]), int(smoothed_mapped[1])), 10, (0, 255, 0), -1)
+
+        cv2.imshow("Tracking", black_screen)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+    face_mesh.close()
 
 if __name__ == "__main__":
     main()
