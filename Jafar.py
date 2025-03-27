@@ -7,8 +7,6 @@ from sklearn.linear_model import LinearRegression
 # === Setup ===
 LEFT_IRIS_IDX = list(range(474, 478))
 RIGHT_IRIS_IDX = list(range(469, 473))
-SCREEN_W = 640
-SCREEN_H = 480
 BUFFER_SIZE = 5
 
 # Init MediaPipe
@@ -27,6 +25,31 @@ left_iris_buffer = deque(maxlen=BUFFER_SIZE)
 right_iris_buffer = deque(maxlen=BUFFER_SIZE)
 
 # === Helper Functions ===
+def get_screen_resolution():
+    """Get the screen resolution"""
+    # Create an invisible window in fullscreen to get resolution
+    window_name = "temp_window"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    
+    # Get the screen resolution
+    screen_width = cv2.getWindowImageRect(window_name)[2]
+    screen_height = cv2.getWindowImageRect(window_name)[3]
+    
+    # Close the temporary window
+    cv2.destroyWindow(window_name)
+    
+    return screen_width, screen_height
+
+SCREEN_W, SCREEN_H = get_screen_resolution()
+
+def create_fullscreen_window(title):
+    """Create a fullscreen window with a title"""
+    # Create fullscreen window 
+    cv2.namedWindow(title, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(title, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    return
+
 def get_center(landmarks):
     x = np.mean([pt.x for pt in landmarks])
     y = np.mean([pt.y for pt in landmarks])
@@ -59,8 +82,7 @@ def calibrate(cap):
     iris_data = []
     screen_data = []
 
-    cv2.namedWindow("Calibration", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Calibration", SCREEN_W, SCREEN_H)
+    create_fullscreen_window("Calibration")
 
     print("Calibration: Look at the dot and press SPACE")
 
@@ -115,8 +137,7 @@ def calibrate(cap):
 # === Tracking Phase ===
 def track_gaze(cap, model_x, model_y):
     print("Gaze tracking... ESC to exit")
-    cv2.namedWindow("Iris Tracking", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Iris Tracking", SCREEN_W, SCREEN_H)
+    create_fullscreen_window("Iris Tracking")
 
     while True:
         ret, frame = cap.read()
@@ -156,7 +177,8 @@ def track_gaze(cap, model_x, model_y):
 
 # === Main ===
 if __name__ == "__main__":
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(0)
+    #cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) for windows
     model_x, model_y = calibrate(cap)
     track_gaze(cap, model_x, model_y)
     cap.release()
