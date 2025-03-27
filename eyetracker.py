@@ -4,7 +4,6 @@ import cv2
 import numpy as np
 import dlib
 
-
 class EyeTrackingHeatmap:
     def __init__(self, stimulus_path=None, camera_id=0, heatmap_resolution=(800, 600)):
         self.camera_id = camera_id
