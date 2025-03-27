@@ -2,7 +2,7 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import time
-
+import platform
 # Initialize Mediapipe Face Mesh with iris tracking
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
@@ -18,8 +18,14 @@ RIGHT_IRIS_IDX = [473, 474, 475, 476]
 
 def get_screen_resolution():
     window_name = "temp_win"
-    cv2.namedWindow(window_name, cv2.WND_PROP_FULLSCREEN)
-    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    
+    if platform.system() == "Darwin":
+        from screeninfo import get_monitors
+        monitor = get_monitors()[0]  # Get primary monitor
+        return monitor.width * 2, monitor.height * 2 # for retina display
+    else:
+        cv2.namedWindow(window_name, cv2.WND_PROP_FULLSCREEN)
+        cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     screen_w = cv2.getWindowImageRect(window_name)[2]
     screen_h = cv2.getWindowImageRect(window_name)[3]
     cv2.destroyWindow(window_name)
@@ -68,6 +74,8 @@ def calibrate(cap):
 
             calib_img = np.zeros((SCREEN_H, SCREEN_W, 3), dtype=np.uint8)
             cv2.circle(calib_img, point, 12, (0, 0, 255), -1)  # Red dot
+            cv2.namedWindow("Calibration", cv2.WINDOW_NORMAL)
+            cv2.setWindowProperty("Calibration", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
             cv2.imshow("Calibration", calib_img)
 
             if results.multi_face_landmarks:
