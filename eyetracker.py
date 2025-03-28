@@ -41,10 +41,39 @@ def compute_gaze_position(left_center, right_center):
     return (left_center + right_center) / 2
 
 def calibrate(cap):
-    # Define calibration points close to corners
+    # === Show Instructions Window ===
+    instruction_text = [
+        "Welcome to the first stage of this program: Calibration.",
+        "",
+        "You will see red dots appear in different corners of the screen.",
+        "Please look directly at the red dot and press the spacebar.",
+        "",
+        "Once done, the next red dot will appear.",
+        "",
+        "Press any key to begin."
+    ]
+
+    instruction_img = np.zeros((SCREEN_H, SCREEN_W, 3), dtype=np.uint8)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 1
+    thickness = 2
+    line_height = 40
+    start_y = SCREEN_H // 4
+
+    for i, line in enumerate(instruction_text):
+        size = cv2.getTextSize(line, font, font_scale, thickness)[0]
+        x = (SCREEN_W - size[0]) // 2
+        y = start_y + i * line_height
+        cv2.putText(instruction_img, line, (x, y), font, font_scale, (255, 255, 255), thickness)
+
+    cv2.imshow("Calibration", instruction_img)
+    cv2.waitKey(0)
+    cv2.destroyWindow("Calibration")
+
+    # === Start Calibration Phase ===
     margin = 0.02
     calibration_targets = [
-        (int(SCREEN_W * margin), int(SCREEN_H * margin)),                   # Top-left
+        (int(SCREEN_W * margin), int(SCREEN_H * margin)),                  # Top-left
         (int(SCREEN_W * (1 - margin)), int(SCREEN_H * margin)),            # Top-right
         (int(SCREEN_W * (1 - margin)), int(SCREEN_H * (1 - margin))),      # Bottom-right
         (int(SCREEN_W * margin), int(SCREEN_H * (1 - margin)))             # Bottom-left
