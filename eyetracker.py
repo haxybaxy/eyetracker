@@ -3,6 +3,7 @@ import mediapipe as mp
 import numpy as np
 import platform
 from screeninfo import get_monitors
+from scipy.ndimage import gaussian_filter
 
 # Initialize Mediapipe Face Mesh with iris tracking
 mp_face_mesh = mp.solutions.face_mesh
@@ -134,21 +135,21 @@ def calibrate(cap):
     cv2.destroyWindow("Calibration")
     return transform_matrix, baseline_distance
 
-# Example bounding boxes — adjust these based on your layout
-products = {
-    "perfume": ((100, 100), (400, 380)),
-    "shoe": ((800, 100), (1080, 380)),
-    "watch": ((100, 600), (360, 860)),
-    "sunglasses": ((800, 600), (1080, 860))
-}
+def create_heatmap(shape, points, sigma=30):
+    """Create a heatmap from gaze points."""
+    heatmap = np.zeros(shape[:2], dtype=np.float32)
+    for point in points:
+        x, y = int(point[0]), int(point[1])
+        if 0 <= x < shape[1] and 0 <= y < shape[0]:
+            heatmap[y, x] += 1
+    heatmap = gaussian_filter(heatmap, sigma=sigma)
+    heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
+    return heatmap
 
-def check_gaze_region(gaze_point, product_boxes):
-    x, y = int(gaze_point[0]), int(gaze_point[1])
-    for product, ((x1, y1), (x2, y2)) in product_boxes.items():
-        if x1 <= x <= x2 and y1 <= y <= y2:
-            return product
-    return None
-
+def apply_heatmap_overlay(image, heatmap, alpha=0.5):
+    """Apply heatmap overlay to the image."""
+    heatmap_colored = cv2.applyColorMap((heatmap * 255).astype(np.uint8), cv2.COLORMAP_JET)
+    return cv2.addWeighted(image, 1 - alpha, heatmap_colored, alpha, 0)
 
 def main():
     cap = cv2.VideoCapture(0)
@@ -161,15 +162,17 @@ def main():
     print("Press SPACE to finish viewing and see results.\n")
 
     # Load and resize product layout image
-    item_page = cv2.imread("./product_page.png") #relative path for image 
+    item_page = cv2.imread("./product_page.png")
     if item_page is None:
         print("Error: Failed to load product image. Check file name and path.")
         return
     item_page = cv2.resize(item_page, (SCREEN_W, SCREEN_H))
 
-    attention_counter = {key: 0 for key in products}
     smoothing_factor = 0.2
     smoothed_mapped = None
+    
+    # Initialize gaze points collection
+    gaze_points = []
 
     while True:
         ret, frame = cap.read()
@@ -204,12 +207,10 @@ def main():
                 smoothed_mapped = smoothing_factor * np.array([mapped_x, mapped_y], dtype=np.float32) + \
                                   (1 - smoothing_factor) * smoothed_mapped
 
-            # Gaze region check
-            region = check_gaze_region(smoothed_mapped, products)
-            if region:
-                attention_counter[region] += 1
-                cv2.rectangle(display_frame, products[region][0], products[region][1], (0, 255, 0), 3)
+            # Store gaze point for final heatmap
+            gaze_points.append(smoothed_mapped)
 
+            # Draw gaze point
             cv2.circle(display_frame, (int(smoothed_mapped[0]), int(smoothed_mapped[1])), 10, (0, 255, 0), -1)
 
         cv2.imshow("Tracking", display_frame)
@@ -222,13 +223,15 @@ def main():
     cv2.destroyAllWindows()
     face_mesh.close()
 
-    # Final result
-    most_looked_at = max(attention_counter, key=attention_counter.get)
-    print("You looked most at:", most_looked_at)
-    print("Full attention breakdown:")
-    for product, count in attention_counter.items():
-        print(f"{product}: {count} frames")
-
+    # Show final heatmap
+    if gaze_points:
+        print("\nGenerating heatmap visualization...")
+        final_heatmap = create_heatmap(item_page.shape, gaze_points)
+        final_overlay = apply_heatmap_overlay(item_page, final_heatmap)
+        cv2.imshow("Final Heatmap", final_overlay)
+        print("Press any key to close the heatmap window.")
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
