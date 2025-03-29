@@ -160,7 +160,7 @@ def main():
     print("Press SPACE to finish viewing and see results.\n")
 
     # Load and resize product layout image
-    item_page = cv2.imread("/Users/alexandrakhreiche/Desktop/CV_Grp/eyetracker/product_page.png")  # rename your image accordingly
+    item_page = cv2.imread("./product_page.png") #relative path for image 
     if item_page is None:
         print("Error: Failed to load product image. Check file name and path.")
         return
