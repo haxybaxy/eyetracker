@@ -135,10 +135,10 @@ def calibrate(cap):
 
 # Example bounding boxes — adjust these based on your layout
 products = {
-    "perfume": ((100, 100), (400, 380)),
-    "shoe": ((800, 100), (1080, 380)),
-    "watch": ((100, 600), (360, 860)),
-    "sunglasses": ((800, 600), (1080, 860))
+    "perfume": ((100, 0), (1200, 1000)),       # Top-left
+    "shoe": ((1200, 0), (3000, 1000)),         # Top-right
+    "watch": ((100, 1000), (1200, 2000)),         # Bottom-left
+    "sunglasses": ((1200, 1000), (3000, 3000))    # Bottom-right
 }
 
 def check_gaze_region(gaze_point, product_boxes):
@@ -207,7 +207,7 @@ def main():
             region = check_gaze_region(smoothed_mapped, products)
             if region:
                 attention_counter[region] += 1
-                cv2.rectangle(display_frame, products[region][0], products[region][1], (0, 255, 0), 3)
+                # cv2.rectangle(display_frame, products[region][0], products[region][1], (0, 255, 0), 3)
 
             cv2.circle(display_frame, (int(smoothed_mapped[0]), int(smoothed_mapped[1])), 10, (0, 255, 0), -1)
 
