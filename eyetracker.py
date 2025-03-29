@@ -1,8 +1,9 @@
 import cv2
 import mediapipe as mp
 import numpy as np
-import time
 import platform
+from screeninfo import get_monitors
+
 # Initialize Mediapipe Face Mesh with iris tracking
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
@@ -20,7 +21,7 @@ def get_screen_resolution():
     window_name = "temp_win"
     
     if platform.system() == "Darwin":
-        from screeninfo import get_monitors
+        
         monitor = get_monitors()[0]  # Get primary monitor
         return monitor.width * 2, monitor.height * 2 # for retina display
     else:
