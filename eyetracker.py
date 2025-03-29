@@ -51,7 +51,7 @@ def calibrate(cap):
     instruction_text = [
         "Welcome to the first stage of this program: Calibration.",
         "",
-        "You will see red dots appear in different corners of the screen.",
+        "You will see red dots appear across the screen.",
         "Please look directly at the red dot and press the spacebar.",
         "",
         "Once done, the next red dot will appear.",
@@ -76,14 +76,11 @@ def calibrate(cap):
     cv2.waitKey(0)
     cv2.destroyWindow("Calibration")
 
-    # === Start Calibration Phase ===
-    margin = 0.02
-    calibration_targets = [
-        (int(SCREEN_W * margin), int(SCREEN_H * margin)),                  # Top-left
-        (int(SCREEN_W * (1 - margin)), int(SCREEN_H * margin)),            # Top-right
-        (int(SCREEN_W * (1 - margin)), int(SCREEN_H * (1 - margin))),      # Bottom-right
-        (int(SCREEN_W * margin), int(SCREEN_H * (1 - margin)))             # Bottom-left
-    ]
+    # === Define 3x3 Grid Calibration Points ===
+    margin = 0.02  # Larger margin for better coverage
+    xs = [margin, 0.5, 1 - margin]
+    ys = [margin, 0.5, 1 - margin]
+    calibration_targets = [(int(SCREEN_W * x), int(SCREEN_H * y)) for y in ys for x in xs]
 
     raw_points = []
     intereye_distances = []
@@ -102,7 +99,7 @@ def calibrate(cap):
             results = face_mesh.process(frame_rgb)
 
             calib_img = np.zeros((SCREEN_H, SCREEN_W, 3), dtype=np.uint8)
-            cv2.circle(calib_img, point, 12, (0, 0, 255), -1)  # Red dot
+            cv2.circle(calib_img, point, 12, (0, 0, 255), -1)
             cv2.namedWindow("Calibration", cv2.WINDOW_NORMAL)
             cv2.setWindowProperty("Calibration", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
             cv2.imshow("Calibration", calib_img)
@@ -126,10 +123,31 @@ def calibrate(cap):
     baseline_distance = np.mean(intereye_distances)
     raw_points = np.array(raw_points, dtype=np.float32)
     calib_points = np.array(calibration_targets, dtype=np.float32)
-    transform_matrix = cv2.getPerspectiveTransform(raw_points, calib_points)
+
+    # Use homography if we have >4 points
+    if len(raw_points) >= 4:
+        transform_matrix, _ = cv2.findHomography(raw_points, calib_points)
+    else:
+        transform_matrix = cv2.getPerspectiveTransform(raw_points[:4], calib_points[:4])
 
     cv2.destroyWindow("Calibration")
     return transform_matrix, baseline_distance
+
+# Example bounding boxes — adjust these based on your layout
+products = {
+    "perfume": ((100, 100), (400, 380)),
+    "shoe": ((800, 100), (1080, 380)),
+    "watch": ((100, 600), (360, 860)),
+    "sunglasses": ((800, 600), (1080, 860))
+}
+
+def check_gaze_region(gaze_point, product_boxes):
+    x, y = int(gaze_point[0]), int(gaze_point[1])
+    for product, ((x1, y1), (x2, y2)) in product_boxes.items():
+        if x1 <= x <= x2 and y1 <= y <= y2:
+            return product
+    return None
+
 
 def main():
     cap = cv2.VideoCapture(0)
@@ -139,15 +157,20 @@ def main():
 
     transform_matrix, baseline_distance = calibrate(cap)
     print("\nCalibration complete. Tracking started...")
-    print("Press 'Q' to exit.\n")
+    print("Press SPACE to finish viewing and see results.\n")
 
-    # === Live Tracking on black screen ===
+    # Load and resize product layout image
+    item_page = cv2.imread("./product_page.png") #relative path for image 
+    if item_page is None:
+        print("Error: Failed to load product image. Check file name and path.")
+        return
+    item_page = cv2.resize(item_page, (SCREEN_W, SCREEN_H))
+
+    attention_counter = {key: 0 for key in products}
     smoothing_factor = 0.2
     smoothed_mapped = None
-    start_time = time.time()
-    duration = 30  # seconds
 
-    while time.time() - start_time < duration:
+    while True:
         ret, frame = cap.read()
         if not ret:
             continue
@@ -155,7 +178,7 @@ def main():
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = face_mesh.process(frame_rgb)
 
-        black_screen = np.zeros((SCREEN_H, SCREEN_W, 3), dtype=np.uint8)
+        display_frame = item_page.copy()
 
         if results.multi_face_landmarks:
             face_landmarks = results.multi_face_landmarks[0]
@@ -165,7 +188,7 @@ def main():
 
             current_distance = np.linalg.norm(left_center - right_center)
             distance_scale = baseline_distance / current_distance
-            adjusted_gaze = (gaze_point - gaze_point * 0) * distance_scale
+            adjusted_gaze = gaze_point * distance_scale
 
             raw_point = np.array([[[gaze_point[0], gaze_point[1]]]], dtype=np.float32)
             mapped_point = cv2.perspectiveTransform(raw_point, transform_matrix)
@@ -180,15 +203,31 @@ def main():
                 smoothed_mapped = smoothing_factor * np.array([mapped_x, mapped_y], dtype=np.float32) + \
                                   (1 - smoothing_factor) * smoothed_mapped
 
-            cv2.circle(black_screen, (int(smoothed_mapped[0]), int(smoothed_mapped[1])), 10, (0, 255, 0), -1)
+            # Gaze region check
+            region = check_gaze_region(smoothed_mapped, products)
+            if region:
+                attention_counter[region] += 1
+                cv2.rectangle(display_frame, products[region][0], products[region][1], (0, 255, 0), 3)
 
-        cv2.imshow("Tracking", black_screen)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+            cv2.circle(display_frame, (int(smoothed_mapped[0]), int(smoothed_mapped[1])), 10, (0, 255, 0), -1)
+
+        cv2.imshow("Tracking", display_frame)
+        key = cv2.waitKey(1) & 0xFF
+        if key == 32:  # SPACE key
+            print("\nSpace pressed — ending tracking.\n")
             break
 
     cap.release()
     cv2.destroyAllWindows()
     face_mesh.close()
+
+    # Final result
+    most_looked_at = max(attention_counter, key=attention_counter.get)
+    print("You looked most at:", most_looked_at)
+    print("Full attention breakdown:")
+    for product, count in attention_counter.items():
+        print(f"{product}: {count} frames")
+
 
 if __name__ == "__main__":
     main()
