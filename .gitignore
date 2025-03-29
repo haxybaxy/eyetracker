@@ -1,3 +1,11 @@
 venv/
+.venv/
+.DS_Store
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
 shape_predictor_68_face_landmarks.dat
