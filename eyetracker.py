@@ -4,6 +4,7 @@ import numpy as np
 import platform
 from screeninfo import get_monitors
 from scipy.ndimage import gaussian_filter
+from pytubefix import YouTube
 
 # Initialize Mediapipe Face Mesh with iris tracking
 mp_face_mesh = mp.solutions.face_mesh
@@ -157,32 +158,65 @@ def main():
         print("Error: Unable to access camera")
         return
 
+    # Add YouTube video handling
+    try:
+        youtube_url = "https://www.youtube.com/watch?v=dz_GbQ2YFN4"
+        # Force SSL certificate verification off if needed
+        import ssl
+        ssl._create_default_https_context = ssl._create_unverified_context
+        
+        # Add retry logic
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                yt = YouTube(youtube_url)
+                # Get the lowest resolution stream to avoid performance issues
+                stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').first()
+                if stream is None:
+                    raise Exception("No suitable video stream found")
+                video_path = stream.download(filename='temp_video')
+                break
+            except Exception as e:
+                if attempt == max_attempts - 1:
+                    raise e
+                print(f"Attempt {attempt + 1} failed, retrying...")
+                import time
+                time.sleep(1)
+        
+        video = cv2.VideoCapture(video_path)
+        if not video.isOpened():
+            raise Exception("Failed to open downloaded video")
+            
+    except Exception as e:
+        print(f"Error loading YouTube video: {e}")
+        print("Please check your internet connection and try again.")
+        print("Alternatively, you can use a local video file instead.")
+        return
+
     transform_matrix, baseline_distance = calibrate(cap)
     print("\nCalibration complete. Tracking started...")
     print("Press SPACE to finish viewing and see results.\n")
 
-    # Load and resize product layout image
-    item_page = cv2.imread("./product_page.png")
-    if item_page is None:
-        print("Error: Failed to load product image. Check file name and path.")
-        return
-    item_page = cv2.resize(item_page, (SCREEN_W, SCREEN_H))
-
     smoothing_factor = 0.2
     smoothed_mapped = None
-    
-    # Initialize gaze points collection
     gaze_points = []
 
     while True:
         ret, frame = cap.read()
-        if not ret:
+        ret_video, video_frame = video.read()
+        
+        if not ret or not ret_video:
+            video.set(cv2.CAP_PROP_POS_FRAMES, 0)  # Loop video
+            ret_video, video_frame = video.read()
             continue
+
+        # Resize video frame to screen dimensions
+        video_frame = cv2.resize(video_frame, (SCREEN_W, SCREEN_H))
         frame = cv2.flip(frame, 1)
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = face_mesh.process(frame_rgb)
 
-        display_frame = item_page.copy()
+        display_frame = video_frame.copy()
 
         if results.multi_face_landmarks:
             face_landmarks = results.multi_face_landmarks[0]
@@ -219,19 +253,34 @@ def main():
             print("\nSpace pressed — ending tracking.\n")
             break
 
+    # Clean up
     cap.release()
+    
+    # Capture last frame before releasing video
+    video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    ret_last, last_frame = video.read()
+    video.release()
+    
     cv2.destroyAllWindows()
     face_mesh.close()
 
     # Show final heatmap
-    if gaze_points:
+    if gaze_points and ret_last:  # Make sure we got the last frame
         print("\nGenerating heatmap visualization...")
-        final_heatmap = create_heatmap(item_page.shape, gaze_points)
-        final_overlay = apply_heatmap_overlay(item_page, final_heatmap)
+        last_frame = cv2.resize(last_frame, (SCREEN_W, SCREEN_H))
+        final_heatmap = create_heatmap(last_frame.shape, gaze_points)
+        final_overlay = apply_heatmap_overlay(last_frame, final_heatmap)
         cv2.imshow("Final Heatmap", final_overlay)
         print("Press any key to close the heatmap window.")
         cv2.waitKey(0)
         cv2.destroyAllWindows()
+    else:
+        print("Warning: Could not generate heatmap - failed to capture final frame")
+
+    # Clean up downloaded video file
+    import os
+    if os.path.exists('temp_video'):
+        os.remove('temp_video')
 
 if __name__ == "__main__":
     main()
