@@ -3,6 +3,8 @@ import mediapipe as mp
 import numpy as np
 import time
 import platform
+
+
 # Initialize Mediapipe Face Mesh with iris tracking
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
@@ -133,14 +135,16 @@ def calibrate(cap):
     cv2.destroyWindow("Calibration")
     return transform_matrix, baseline_distance
 
-# Example bounding boxes — adjust these based on your layout
-products = {
-    "perfume": ((100, 0), (1200, 1000)),       # Top-left
-    "shoe": ((1200, 0), (3000, 1000)),         # Top-right
-    "watch": ((100, 1000), (1200, 2000)),         # Bottom-left
-    "sunglasses": ((1200, 1000), (3000, 3000))    # Bottom-right
-}
 
+half_width = SCREEN_W // 2
+half_height = SCREEN_H // 2
+
+products = {
+    "perfume":    ((0, 0), (half_width, half_height)),                   # Top-left
+    "shoe":       ((half_width, 0), (SCREEN_W, half_height)),           # Top-right
+    "watch":      ((0, half_height), (half_width, SCREEN_H)),           # Bottom-left
+    "sunglasses": ((half_width, half_height), (SCREEN_W, SCREEN_H))     # Bottom-right
+}
 def check_gaze_region(gaze_point, product_boxes):
     x, y = int(gaze_point[0]), int(gaze_point[1])
     for product, ((x1, y1), (x2, y2)) in product_boxes.items():
