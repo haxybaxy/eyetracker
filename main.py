@@ -159,10 +159,10 @@ class EyeTracker:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = self.face_mesh.process(frame_rgb)
 
-                # Display calibration target
-                calib_img = np.zeros((self.screen_h, self.screen_w, 3), dtype=np.uint8)
-                cv2.circle(calib_img, point, CALIBRATION_DOT_RADIUS, (0, 0, 255), -1)
-                cv2.imshow("Calibration", calib_img)
+                # Create a combined display with camera feed and calibration dot
+                display_frame = frame.copy()
+                # Draw calibration target
+                cv2.circle(display_frame, point, CALIBRATION_DOT_RADIUS, (0, 0, 255), -1)
 
                 # Process face landmarks and display gaze point
                 if results.multi_face_landmarks:
@@ -170,7 +170,10 @@ class EyeTracker:
                     left_center = self._get_iris_center(face_landmarks, LEFT_IRIS_IDX, frame.shape)
                     right_center = self._get_iris_center(face_landmarks, RIGHT_IRIS_IDX, frame.shape)
                     gaze_point = self._compute_gaze_position(left_center, right_center)
-                    cv2.circle(frame, (int(gaze_point[0]), int(gaze_point[1])), 5, (0, 255, 0), -1)
+                    cv2.circle(display_frame, (int(gaze_point[0]), int(gaze_point[1])), 5, (0, 255, 0), -1)
+
+                # Display the combined frame
+                cv2.imshow("Calibration", display_frame)
 
                 key = cv2.waitKey(1) & 0xFF
                 if key == 32 and results.multi_face_landmarks:  # SPACE key pressed
