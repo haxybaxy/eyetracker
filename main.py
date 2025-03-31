@@ -298,6 +298,7 @@ class EyeTracker:
 
         smoothed_mapped = None
         gaze_points = []
+        frame_gaze_points = []  # Store gaze points with their frame numbers
 
         def on_gaze_point(mapped_x, mapped_y, display_frame):
             nonlocal smoothed_mapped
@@ -309,6 +310,9 @@ class EyeTracker:
                                 (1 - SMOOTHING_FACTOR) * smoothed_mapped
 
             gaze_points.append(smoothed_mapped)
+            # Store frame number with gaze point
+            current_frame = video.get(cv2.CAP_PROP_POS_FRAMES)
+            frame_gaze_points.append((current_frame, smoothed_mapped))
             cv2.circle(display_frame, (int(smoothed_mapped[0]), int(smoothed_mapped[1])), 10, (0, 255, 0), -1)
 
         # Create windows with specific size
@@ -340,7 +344,51 @@ class EyeTracker:
         ret_last, last_frame = video.read()
         video.release()
         
-        # Generate and display final heatmap
+        # After tracking loop ends, show replay
+        if frame_gaze_points:
+            print("\nShowing replay with gaze points...")
+            # Create a new video capture for replay
+            replay_video = cv2.VideoCapture(video_path)
+            
+            # Create replay window
+            cv2.namedWindow("Replay", cv2.WINDOW_NORMAL)
+            cv2.setWindowProperty("Replay", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            cv2.resizeWindow("Replay", self.screen_w, self.screen_h)
+
+            current_gaze_idx = 0
+            trail_length = 30  # Number of previous gaze points to show in trail
+
+            while True:
+                ret_video, video_frame = replay_video.read()
+                if not ret_video:
+                    break
+
+                current_frame = replay_video.get(cv2.CAP_PROP_POS_FRAMES)
+                display_frame = cv2.resize(video_frame, (self.screen_w, self.screen_h))
+
+                # Draw gaze trail
+                while (current_gaze_idx < len(frame_gaze_points) and 
+                       frame_gaze_points[current_gaze_idx][0] <= current_frame):
+                    current_gaze_idx += 1
+
+                # Draw trail of recent gaze points with fading effect
+                start_idx = max(0, current_gaze_idx - trail_length)
+                for i, (_, gaze_point) in enumerate(frame_gaze_points[start_idx:current_gaze_idx]):
+                    alpha = (i + 1) / trail_length  # Fade older points
+                    color = (0, int(255 * alpha), 0)  # Green with fading intensity
+                    cv2.circle(display_frame, 
+                             (int(gaze_point[0]), int(gaze_point[1])), 
+                             5, color, -1)
+
+                cv2.imshow("Replay", display_frame)
+                if cv2.waitKey(1) & 0xFF == 32:  # SPACE to skip replay
+                    break
+
+            # Clean up replay video
+            replay_video.release()
+            cv2.destroyWindow("Replay")
+
+        # Show final heatmap
         if gaze_points and ret_last:
             print("\nGenerating heatmap visualization...")
             last_frame = cv2.resize(last_frame, (self.screen_w, self.screen_h))
