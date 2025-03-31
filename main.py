@@ -159,10 +159,19 @@ class EyeTracker:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = self.face_mesh.process(frame_rgb)
 
-                # Display calibration target
-                calib_img = np.zeros((self.screen_h, self.screen_w, 3), dtype=np.uint8)
-                cv2.circle(calib_img, point, CALIBRATION_DOT_RADIUS, (0, 0, 255), -1)
-                cv2.imshow("Calibration", calib_img)
+                # Create a combined display with camera feed and calibration dot
+                display_frame = frame.copy()
+                # Draw calibration target
+                cv2.circle(display_frame, point, CALIBRATION_DOT_RADIUS, (0, 0, 255), -1)
+
+                # Add text instruction
+                cv2.putText(display_frame,
+                    "Look at the red dot and press SPACE to capture",
+                    (50, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (255, 255, 255),
+                    2)
 
                 # Process face landmarks and display gaze point
                 if results.multi_face_landmarks:
@@ -170,7 +179,10 @@ class EyeTracker:
                     left_center = self._get_iris_center(face_landmarks, LEFT_IRIS_IDX, frame.shape)
                     right_center = self._get_iris_center(face_landmarks, RIGHT_IRIS_IDX, frame.shape)
                     gaze_point = self._compute_gaze_position(left_center, right_center)
-                    cv2.circle(frame, (int(gaze_point[0]), int(gaze_point[1])), 5, (0, 255, 0), -1)
+                    cv2.circle(display_frame, (int(gaze_point[0]), int(gaze_point[1])), 5, (0, 255, 0), -1)
+
+                # Display the combined frame
+                cv2.imshow("Calibration", display_frame)
 
                 key = cv2.waitKey(1) & 0xFF
                 if key == 32 and results.multi_face_landmarks:  # SPACE key pressed
@@ -260,11 +272,14 @@ class EyeTracker:
 
         return display_frame
 
-    def run_youtube_version(self, cap, transform_matrix, baseline_distance):
+    def run_youtube_version(self, cap, transform_matrix, baseline_distance, custom_url=None):
         """Run the YouTube video analysis version."""
         try:
             # Download and prepare YouTube video
-            youtube_url = "https://www.youtube.com/watch?v=dz_GbQ2YFN4"
+            if custom_url:
+                youtube_url = custom_url
+            else:
+                youtube_url = "https://www.youtube.com/watch?v=dz_GbQ2YFN4"
             ssl._create_default_https_context = ssl._create_unverified_context
             
             # Add retry logic for video download
@@ -298,6 +313,7 @@ class EyeTracker:
 
         smoothed_mapped = None
         gaze_points = []
+        frame_gaze_points = []  # Store gaze points with their frame numbers
 
         def on_gaze_point(mapped_x, mapped_y, display_frame):
             nonlocal smoothed_mapped
@@ -309,6 +325,9 @@ class EyeTracker:
                                 (1 - SMOOTHING_FACTOR) * smoothed_mapped
 
             gaze_points.append(smoothed_mapped)
+            # Store frame number with gaze point
+            current_frame = video.get(cv2.CAP_PROP_POS_FRAMES)
+            frame_gaze_points.append((current_frame, smoothed_mapped))
             cv2.circle(display_frame, (int(smoothed_mapped[0]), int(smoothed_mapped[1])), 10, (0, 255, 0), -1)
 
         # Create windows with specific size
@@ -340,7 +359,51 @@ class EyeTracker:
         ret_last, last_frame = video.read()
         video.release()
         
-        # Generate and display final heatmap
+        # After tracking loop ends, show replay
+        if frame_gaze_points:
+            print("\nShowing replay with gaze points...")
+            # Create a new video capture for replay
+            replay_video = cv2.VideoCapture(video_path)
+            
+            # Create replay window
+            cv2.namedWindow("Replay", cv2.WINDOW_NORMAL)
+            cv2.setWindowProperty("Replay", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            cv2.resizeWindow("Replay", self.screen_w, self.screen_h)
+
+            current_gaze_idx = 0
+            trail_length = 30  # Number of previous gaze points to show in trail
+
+            while True:
+                ret_video, video_frame = replay_video.read()
+                if not ret_video:
+                    break
+
+                current_frame = replay_video.get(cv2.CAP_PROP_POS_FRAMES)
+                display_frame = cv2.resize(video_frame, (self.screen_w, self.screen_h))
+
+                # Draw gaze trail
+                while (current_gaze_idx < len(frame_gaze_points) and 
+                       frame_gaze_points[current_gaze_idx][0] <= current_frame):
+                    current_gaze_idx += 1
+
+                # Draw trail of recent gaze points with fading effect
+                start_idx = max(0, current_gaze_idx - trail_length)
+                for i, (_, gaze_point) in enumerate(frame_gaze_points[start_idx:current_gaze_idx]):
+                    alpha = (i + 1) / trail_length  # Fade older points
+                    color = (0, int(255 * alpha), 0)  # Green with fading intensity
+                    cv2.circle(display_frame, 
+                             (int(gaze_point[0]), int(gaze_point[1])), 
+                             5, color, -1)
+
+                cv2.imshow("Replay", display_frame)
+                if cv2.waitKey(1) & 0xFF == 32:  # SPACE to skip replay
+                    break
+
+            # Clean up replay video
+            replay_video.release()
+            cv2.destroyWindow("Replay")
+
+        # Show final heatmap
         if gaze_points and ret_last:
             print("\nGenerating heatmap visualization...")
             last_frame = cv2.resize(last_frame, (self.screen_w, self.screen_h))
@@ -362,16 +425,24 @@ class EyeTracker:
         if os.path.exists('temp_video'):
             os.remove('temp_video')
 
-    def run_product_version(self, cap, transform_matrix, baseline_distance):
+    def run_product_version(self, cap, transform_matrix, baseline_distance, custom_photo_path=None):
         """Run the product layout analysis version."""
         print("\nCalibration complete. Tracking started...")
         print("Press SPACE to finish viewing and see results.\n")
 
         # Load and prepare product page image
-        item_page = cv2.imread("./product_page.png")
-        if item_page is None:
-            print("Error: Failed to load product image. Check file name and path.")
-            return
+        if custom_photo_path:
+            item_page = cv2.imread(custom_photo_path)
+            if item_page is None:
+                print(f"Error: Failed to load custom image from {custom_photo_path}")
+                print("Please check the file path and try again.")
+                return
+        else:
+            item_page = cv2.imread("./product_page.png")
+            if item_page is None:
+                print("Error: Failed to load default product image. Check file name and path.")
+                return
+                
         item_page = cv2.resize(item_page, (self.screen_w, self.screen_h))
 
         # Create windows with specific size
@@ -400,10 +471,11 @@ class EyeTracker:
         attention_counter = {key: 0 for key in products}
         smoothed_mapped = None
         gaze_points = []
+        frame_gaze_points = []  # Add this to store timestamped gaze points
+        start_time = time.time()  # Add this to track timing
 
         def on_gaze_point(mapped_x, mapped_y, display_frame):
             nonlocal smoothed_mapped
-            # Apply smoothing to gaze point
             if smoothed_mapped is None:
                 smoothed_mapped = np.array([mapped_x, mapped_y], dtype=np.float32)
             else:
@@ -411,16 +483,17 @@ class EyeTracker:
                                 (1 - SMOOTHING_FACTOR) * smoothed_mapped
 
             gaze_points.append(smoothed_mapped)
+            # Store timestamp with gaze point
+            current_time = time.time() - start_time
+            frame_gaze_points.append((current_time, smoothed_mapped))
 
             # Track which product is being looked at
             region = check_gaze_region(smoothed_mapped, products)
             if region:
                 attention_counter[region] += 1
-                print(f"Looking at: {region}")
 
             # Display gaze point and coordinates
             cv2.circle(display_frame, (int(smoothed_mapped[0]), int(smoothed_mapped[1])), 10, (0, 255, 0), -1)
-            
             cv2.putText(display_frame,
                 f"X: {int(smoothed_mapped[0])}, Y: {int(smoothed_mapped[1])}",
                 (50, 50),
@@ -437,6 +510,47 @@ class EyeTracker:
             if key == 32:  # SPACE key
                 print("\nSpace pressed — ending tracking.\n")
                 break
+
+        # Show replay
+        if frame_gaze_points:
+            print("\nShowing replay with gaze points...")
+            
+            # Create replay window
+            cv2.namedWindow("Replay", cv2.WINDOW_NORMAL)
+            cv2.setWindowProperty("Replay", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            cv2.resizeWindow("Replay", self.screen_w, self.screen_h)
+
+            # Calculate replay speed (compress viewing time to 5 seconds)
+            total_time = frame_gaze_points[-1][0]  # Last timestamp
+            time_scale = total_time / 5.0  # Scale time to show everything in 5 seconds
+            
+            current_gaze_idx = 0
+            trail_length = 30  # Number of previous gaze points to show in trail
+            replay_start_time = time.time()
+
+            while True:
+                display_frame = item_page.copy()
+                current_time = (time.time() - replay_start_time) * time_scale
+
+                # Draw gaze trail
+                while (current_gaze_idx < len(frame_gaze_points) and 
+                       frame_gaze_points[current_gaze_idx][0] <= current_time):
+                    current_gaze_idx += 1
+
+                # Draw trail of recent gaze points with fading effect
+                start_idx = max(0, current_gaze_idx - trail_length)
+                for i, (_, gaze_point) in enumerate(frame_gaze_points[start_idx:current_gaze_idx]):
+                    alpha = (i + 1) / trail_length  # Fade older points
+                    color = (0, int(255 * alpha), 0)  # Green with fading intensity
+                    cv2.circle(display_frame, 
+                             (int(gaze_point[0]), int(gaze_point[1])), 
+                             5, color, -1)
+
+                cv2.imshow("Replay", display_frame)
+                if cv2.waitKey(1) & 0xFF == 32 or current_gaze_idx >= len(frame_gaze_points):  # SPACE or finished
+                    break
+
+            cv2.destroyWindow("Replay")
 
         # Generate and display final heatmap
         if gaze_points:
@@ -474,19 +588,30 @@ def main():
     
     This function:
     1. Displays welcome message and version options
-    2. Initializes the eye tracker and camera
-    3. Performs calibration
-    4. Runs the selected version (YouTube or Product)
-    5. Handles cleanup and error cases
+    2. Gets custom URL or photo path if needed
+    3. Initializes the eye tracker and camera
+    4. Performs calibration
+    5. Runs the selected version (YouTube, Product, Custom YouTube, or Custom Photo)
+    6. Handles cleanup and error cases
     """
     try:
         # Display welcome message and get user choice
         print("\nWelcome to the Eye Tracker Application!")
         print("Please choose which version you want to run:")
-        print("1. YouTube Video Version")
-        print("2. Product Layout Version")
+        print("1. YouTube Video Version (Default Video)")
+        print("2. Product Layout Version (Default Image)")
+        print("3. Custom YouTube Video Version")
+        print("4. Custom Photo Version")
         
         choice = get_user_choice()
+        
+        # Get custom URL or photo path if needed
+        custom_url = None
+        custom_photo_path = None
+        if choice == 3:
+            custom_url = input("\nPlease enter the YouTube URL: ")
+        elif choice == 4:
+            custom_photo_path = input("\nPlease enter the path to your photo: ")
         
         # Initialize components
         eye_tracker = EyeTracker()
@@ -502,8 +627,12 @@ def main():
             # Run selected version
             if choice == 1:
                 eye_tracker.run_youtube_version(cap, transform_matrix, baseline_distance)
-            else:
+            elif choice == 2:
                 eye_tracker.run_product_version(cap, transform_matrix, baseline_distance)
+            elif choice == 3:
+                eye_tracker.run_youtube_version(cap, transform_matrix, baseline_distance, custom_url=custom_url)
+            else:  # choice == 4
+                eye_tracker.run_product_version(cap, transform_matrix, baseline_distance, custom_photo_path=custom_photo_path)
         finally:
             # Clean up resources
             cap.release()
@@ -519,16 +648,16 @@ def get_user_choice() -> int:
     """Get and validate user's choice of version.
     
     Returns:
-        int: User's validated choice (1 or 2)
+        int: User's validated choice (1, 2, 3, or 4)
     """
     while True:
         try:
-            choice = int(input("\nEnter your choice (1 or 2): "))
-            if choice in [1, 2]:
+            choice = int(input("\nEnter your choice (1, 2, 3, or 4): "))
+            if choice in [1, 2, 3, 4]:
                 return choice
-            print("Please enter either 1 or 2.")
+            print("Please enter either 1, 2, 3, or 4.")
         except ValueError:
-            print("Please enter a valid number (1 or 2).")
+            print("Please enter a valid number (1, 2, 3, or 4).")
 
 def initialize_camera():
     """Initialize and validate camera connection.
