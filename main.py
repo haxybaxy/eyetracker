@@ -164,6 +164,15 @@ class EyeTracker:
                 # Draw calibration target
                 cv2.circle(display_frame, point, CALIBRATION_DOT_RADIUS, (0, 0, 255), -1)
 
+                # Add text instruction
+                cv2.putText(display_frame,
+                    "Look at the red dot and press SPACE to capture",
+                    (50, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (255, 255, 255),
+                    2)
+
                 # Process face landmarks and display gaze point
                 if results.multi_face_landmarks:
                     face_landmarks = results.multi_face_landmarks[0]
