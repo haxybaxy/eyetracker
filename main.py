@@ -413,16 +413,24 @@ class EyeTracker:
         if os.path.exists('temp_video'):
             os.remove('temp_video')
 
-    def run_product_version(self, cap, transform_matrix, baseline_distance):
+    def run_product_version(self, cap, transform_matrix, baseline_distance, custom_photo_path=None):
         """Run the product layout analysis version."""
         print("\nCalibration complete. Tracking started...")
         print("Press SPACE to finish viewing and see results.\n")
 
         # Load and prepare product page image
-        item_page = cv2.imread("./product_page.png")
-        if item_page is None:
-            print("Error: Failed to load product image. Check file name and path.")
-            return
+        if custom_photo_path:
+            item_page = cv2.imread(custom_photo_path)
+            if item_page is None:
+                print(f"Error: Failed to load custom image from {custom_photo_path}")
+                print("Please check the file path and try again.")
+                return
+        else:
+            item_page = cv2.imread("./product_page.png")
+            if item_page is None:
+                print("Error: Failed to load default product image. Check file name and path.")
+                return
+                
         item_page = cv2.resize(item_page, (self.screen_w, self.screen_h))
 
         # Create windows with specific size
@@ -568,10 +576,10 @@ def main():
     
     This function:
     1. Displays welcome message and version options
-    2. Gets custom URL if needed
+    2. Gets custom URL or photo path if needed
     3. Initializes the eye tracker and camera
     4. Performs calibration
-    5. Runs the selected version (YouTube, Product, or Custom YouTube)
+    5. Runs the selected version (YouTube, Product, Custom YouTube, or Custom Photo)
     6. Handles cleanup and error cases
     """
     try:
@@ -579,15 +587,19 @@ def main():
         print("\nWelcome to the Eye Tracker Application!")
         print("Please choose which version you want to run:")
         print("1. YouTube Video Version (Default Video)")
-        print("2. Product Layout Version")
+        print("2. Product Layout Version (Default Image)")
         print("3. Custom YouTube Video Version")
+        print("4. Custom Photo Version")
         
         choice = get_user_choice()
         
-        # Get custom URL if needed
+        # Get custom URL or photo path if needed
         custom_url = None
+        custom_photo_path = None
         if choice == 3:
             custom_url = input("\nPlease enter the YouTube URL: ")
+        elif choice == 4:
+            custom_photo_path = input("\nPlease enter the path to your photo: ")
         
         # Initialize components
         eye_tracker = EyeTracker()
@@ -605,8 +617,10 @@ def main():
                 eye_tracker.run_youtube_version(cap, transform_matrix, baseline_distance)
             elif choice == 2:
                 eye_tracker.run_product_version(cap, transform_matrix, baseline_distance)
-            else:  # choice == 3
+            elif choice == 3:
                 eye_tracker.run_youtube_version(cap, transform_matrix, baseline_distance, custom_url=custom_url)
+            else:  # choice == 4
+                eye_tracker.run_product_version(cap, transform_matrix, baseline_distance, custom_photo_path=custom_photo_path)
         finally:
             # Clean up resources
             cap.release()
@@ -622,16 +636,16 @@ def get_user_choice() -> int:
     """Get and validate user's choice of version.
     
     Returns:
-        int: User's validated choice (1, 2, or 3)
+        int: User's validated choice (1, 2, 3, or 4)
     """
     while True:
         try:
-            choice = int(input("\nEnter your choice (1, 2, or 3): "))
-            if choice in [1, 2, 3]:
+            choice = int(input("\nEnter your choice (1, 2, 3, or 4): "))
+            if choice in [1, 2, 3, 4]:
                 return choice
-            print("Please enter either 1, 2, or 3.")
+            print("Please enter either 1, 2, 3, or 4.")
         except ValueError:
-            print("Please enter a valid number (1, 2, or 3).")
+            print("Please enter a valid number (1, 2, 3, or 4).")
 
 def initialize_camera():
     """Initialize and validate camera connection.
