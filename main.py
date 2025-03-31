@@ -260,11 +260,14 @@ class EyeTracker:
 
         return display_frame
 
-    def run_youtube_version(self, cap, transform_matrix, baseline_distance):
+    def run_youtube_version(self, cap, transform_matrix, baseline_distance, custom_url=None):
         """Run the YouTube video analysis version."""
         try:
             # Download and prepare YouTube video
-            youtube_url = "https://www.youtube.com/watch?v=dz_GbQ2YFN4"
+            if custom_url:
+                youtube_url = custom_url
+            else:
+                youtube_url = "https://www.youtube.com/watch?v=dz_GbQ2YFN4"
             ssl._create_default_https_context = ssl._create_unverified_context
             
             # Add retry logic for video download
@@ -522,19 +525,26 @@ def main():
     
     This function:
     1. Displays welcome message and version options
-    2. Initializes the eye tracker and camera
-    3. Performs calibration
-    4. Runs the selected version (YouTube or Product)
-    5. Handles cleanup and error cases
+    2. Gets custom URL if needed
+    3. Initializes the eye tracker and camera
+    4. Performs calibration
+    5. Runs the selected version (YouTube, Product, or Custom YouTube)
+    6. Handles cleanup and error cases
     """
     try:
         # Display welcome message and get user choice
         print("\nWelcome to the Eye Tracker Application!")
         print("Please choose which version you want to run:")
-        print("1. YouTube Video Version")
+        print("1. YouTube Video Version (Default Video)")
         print("2. Product Layout Version")
+        print("3. Custom YouTube Video Version")
         
         choice = get_user_choice()
+        
+        # Get custom URL if needed
+        custom_url = None
+        if choice == 3:
+            custom_url = input("\nPlease enter the YouTube URL: ")
         
         # Initialize components
         eye_tracker = EyeTracker()
@@ -550,8 +560,10 @@ def main():
             # Run selected version
             if choice == 1:
                 eye_tracker.run_youtube_version(cap, transform_matrix, baseline_distance)
-            else:
+            elif choice == 2:
                 eye_tracker.run_product_version(cap, transform_matrix, baseline_distance)
+            else:  # choice == 3
+                eye_tracker.run_youtube_version(cap, transform_matrix, baseline_distance, custom_url=custom_url)
         finally:
             # Clean up resources
             cap.release()
@@ -567,16 +579,16 @@ def get_user_choice() -> int:
     """Get and validate user's choice of version.
     
     Returns:
-        int: User's validated choice (1 or 2)
+        int: User's validated choice (1, 2, or 3)
     """
     while True:
         try:
-            choice = int(input("\nEnter your choice (1 or 2): "))
-            if choice in [1, 2]:
+            choice = int(input("\nEnter your choice (1, 2, or 3): "))
+            if choice in [1, 2, 3]:
                 return choice
-            print("Please enter either 1 or 2.")
+            print("Please enter either 1, 2, or 3.")
         except ValueError:
-            print("Please enter a valid number (1 or 2).")
+            print("Please enter a valid number (1, 2, or 3).")
 
 def initialize_camera():
     """Initialize and validate camera connection.
